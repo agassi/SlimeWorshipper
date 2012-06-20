@@ -1,4 +1,9 @@
-import java.util.Arrays;
+import java.awt.BasicStroke;
+import java.awt.Color;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Point;
+import java.awt.Stroke;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -10,6 +15,7 @@ import org.powerbot.game.api.Manifest;
 import org.powerbot.game.api.methods.Tabs;
 import org.powerbot.game.api.methods.Walking;
 import org.powerbot.game.api.methods.Widgets;
+import org.powerbot.game.api.methods.input.Mouse;
 import org.powerbot.game.api.methods.interactive.NPCs;
 import org.powerbot.game.api.methods.interactive.Players;
 import org.powerbot.game.api.methods.node.SceneEntities;
@@ -18,7 +24,6 @@ import org.powerbot.game.api.methods.widget.Bank;
 import org.powerbot.game.api.methods.widget.Camera;
 import org.powerbot.game.api.util.Filter;
 import org.powerbot.game.api.util.Time;
-import org.powerbot.game.api.util.Timer;
 import org.powerbot.game.api.wrappers.Area;
 import org.powerbot.game.api.wrappers.Tile;
 import org.powerbot.game.api.wrappers.interactive.NPC;
@@ -26,13 +31,20 @@ import org.powerbot.game.api.wrappers.map.TilePath;
 import org.powerbot.game.api.wrappers.node.Item;
 import org.powerbot.game.api.wrappers.node.SceneObject;
 import org.powerbot.game.api.wrappers.widget.WidgetChild;
+import org.powerbot.game.bot.event.listener.PaintListener;
 
 @Manifest(name = "SlimeWorshipper", description = "Prays at Ectofuntus", authors = { "Agassi" }, version = 1.0)
-public class SlimeWorshipper extends ActiveScript {
+public class SlimeWorshipper extends ActiveScript implements PaintListener {
 
 	private State state = State.CONFIGURE;
 	private Prayer prayer = Prayer.BONES; // TODO Allow user to set later
 	private boolean checked = false;
+	
+	// Mouse Paint
+	private Point[] mouseLocations = new Point[6];
+	private Color[] mouseColors = mouseColors();
+	private static final BasicStroke mouseStroke = new BasicStroke(2F);
+	private static final Color mouseColor = new Color(245, 184, 0);
 
 	// Bones Per Trip
 	private int bpt;
@@ -481,6 +493,57 @@ public class SlimeWorshipper extends ActiveScript {
 				|| Players.getLocal().isMoving()) {
 			Time.sleep(1000);
 		}
+	}
+	
+	private Color[] mouseColors() {
+		Color[] colors = new Color[mouseLocations.length];
+		int alpha = (int) (255D / (colors.length + 4D));
+		for (int i = 0; i < colors.length; i++) {
+			colors[i] = new Color(mouseColor.getRed(), mouseColor.getGreen(),
+					mouseColor.getBlue(), 255 - alpha * i);
+		}
+		return colors;
+	}
+
+	private void drawMouse(Graphics gr) {
+		Graphics2D g = (Graphics2D) gr;
+
+		// Draw mouse path
+		for (int i = mouseLocations.length - 2; i >= 0; i--) {
+			mouseLocations[i + 1] = mouseLocations[i];
+		}
+		mouseLocations[0] = Mouse.getLocation();
+		Color original = g.getColor();
+		Stroke originalStroke = g.getStroke();
+		g.setStroke(mouseStroke);
+		for (int i = 0; i < mouseLocations.length - 1; i++) {
+			g.setColor(mouseColors[i]);
+			Point p = mouseLocations[i];
+			Point p2 = mouseLocations[i + 1];
+			if (p != null && p2 != null)
+				g.drawLine(p.x, p.y, p2.x, p2.y);
+		}
+
+		// Draw Cross-hair
+		g.setColor(Color.WHITE);
+		Point c = mouseLocations[0];
+		g.drawLine(c.x, c.y - 5, c.x, c.y - 11);
+		g.drawLine(c.x, c.y + 5, c.x, c.y + 11);
+		g.drawLine(c.x - 5, c.y, c.x - 11, c.y);
+		g.drawLine(c.x + 5, c.y, c.x + 11, c.y);
+
+		if (Mouse.isPressed()) {
+			g.setColor(Color.RED);
+			g.drawLine(c.x, c.y, c.x + 2, c.y + 2);
+		}
+
+		g.setColor(original);
+		g.setStroke(originalStroke);
+	}
+
+	@Override
+	public void onRepaint(Graphics gr) {
+		drawMouse(gr);
 	}
 
 }
