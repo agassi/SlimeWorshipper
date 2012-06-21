@@ -12,6 +12,7 @@ import org.powerbot.concurrent.strategy.Condition;
 import org.powerbot.concurrent.strategy.Strategy;
 import org.powerbot.game.api.ActiveScript;
 import org.powerbot.game.api.Manifest;
+import org.powerbot.game.api.methods.Game;
 import org.powerbot.game.api.methods.Tabs;
 import org.powerbot.game.api.methods.Walking;
 import org.powerbot.game.api.methods.Widgets;
@@ -20,6 +21,7 @@ import org.powerbot.game.api.methods.interactive.NPCs;
 import org.powerbot.game.api.methods.interactive.Players;
 import org.powerbot.game.api.methods.node.SceneEntities;
 import org.powerbot.game.api.methods.tab.Inventory;
+import org.powerbot.game.api.methods.tab.Skills;
 import org.powerbot.game.api.methods.widget.Bank;
 import org.powerbot.game.api.methods.widget.Camera;
 import org.powerbot.game.api.util.Filter;
@@ -38,8 +40,10 @@ public class SlimeWorshipper extends ActiveScript implements PaintListener {
 
 	private State state = State.CONFIGURE;
 	private Prayer prayer = Prayer.BONES; // TODO Allow user to set later
+	private int agility = 0;
 	private boolean checked = false;
-	
+	private boolean dryrun = true;
+
 	// Mouse Paint
 	private Point[] mouseLocations = new Point[6];
 	private Color[] mouseColors = mouseColors();
@@ -60,6 +64,11 @@ public class SlimeWorshipper extends ActiveScript implements PaintListener {
 	private static final int BUCKET_OF_SLIME = 4286;
 	private static final int STAIRS = 37454;
 	private static final int HOPPER = 11162;
+	private static final int TRAPDOOR_CLOSED = 5267;
+	private static final int TRAPDOOR_OPENED = 5268;
+	private static final int STAIRS_TRAPDOOR = 5263;
+	private static final int TRAPDOOR_TILE = 5482;
+	private static final int POOL_OF_SLIME = 17119;
 
 	// Areas and Paths
 	private static final Area DAEMONHEIM = new Area(new Tile(3440, 3721, 0),
@@ -74,6 +83,7 @@ public class SlimeWorshipper extends ActiveScript implements PaintListener {
 			new Tile(3667, 3511, 1), new Tile(3667, 3527, 1) });
 	private static final Area GRINDER_AREA = new Area(new Tile(3655, 3527, 1),
 			new Tile(3667, 3522, 1));
+	private static final Tile POOL = new Tile(3683, 9888, 0);
 	private static final Tile BANKER = new Tile(3448, 3719, 0);
 	private static final TilePath PATH_TO_BANKER = new TilePath(new Tile[] {
 			new Tile(3443, 3692, 0), new Tile(3447, 3695, 0),
@@ -85,6 +95,18 @@ public class SlimeWorshipper extends ActiveScript implements PaintListener {
 			new Tile(3661, 3519, 0), new Tile(3662, 3517, 0),
 			new Tile(3663, 3516, 0), new Tile(3664, 3516, 0),
 			new Tile(3665, 3516, 0) });
+	private static final TilePath TRAPDOOR_THIRD_FLOOR_STEPS = new TilePath(
+			new Tile[] { new Tile(3669, 9888, 3), new Tile(3669, 9881, 3),
+					new Tile(3675, 9875, 3), new Tile(3684, 9875, 3),
+					new Tile(3690, 9880, 3), new Tile(3691, 9885, 3) });
+	private static final TilePath TRAPDOOR_SECOND_FLOOR_STEPS = new TilePath(
+			new Tile[] { new Tile(3688, 9888, 2), new Tile(3688, 9883, 2),
+					new Tile(3683, 9877, 2), new Tile(3678, 9877, 2),
+					new Tile(3673, 9881, 2), new Tile(3671, 9885, 2) });
+	private static final TilePath TRAPDOOR_FIRST_FLOOR_STEPS = new TilePath(
+			new Tile[] { new Tile(3675, 9888, 1), new Tile(3674, 9884, 1),
+					new Tile(3679, 9879, 1), new Tile(3682, 9879, 1),
+					new Tile(3685, 9882, 1), new Tile(3687, 9885, 1) });
 
 	@Override
 	protected void setup() {
@@ -95,10 +117,202 @@ public class SlimeWorshipper extends ActiveScript implements PaintListener {
 		WalkToBoneGrinder walkToBoneGrinder = new WalkToBoneGrinder();
 		GrindBones grindBones = new GrindBones();
 
+		// Filling Classes
+		BankForFilling bankForFilling = new BankForFilling();
+		WalkToPoolOfSlime walkToPoolOfSlime = new WalkToPoolOfSlime();
+		FillBuckets fillBuckets = new FillBuckets();
+
 		provide(new Strategy(configure, configure));
+
 		provide(new Strategy(bankForGrinding, bankForGrinding));
 		provide(new Strategy(walkToBoneGrinder, walkToBoneGrinder));
 		provide(new Strategy(grindBones, grindBones));
+
+		provide(new Strategy(bankForFilling, bankForFilling));
+		provide(new Strategy(walkToPoolOfSlime, walkToPoolOfSlime));
+		provide(new Strategy(fillBuckets, fillBuckets));
+	}
+	
+	private class FillBuckets implements Task, Condition {
+
+		@Override
+		public void run() {
+			SceneObject pool = SceneEntities.getNearest(POOL_OF_SLIME);
+			if (pool != null && !pool.isOnScreen()) {
+				Camera.turnTo(pool);
+				if (!pool.isOnScreen())
+					Walking.walk(pool);
+
+				Time.sleep(300, 600);
+				return;
+			}
+
+			Inventory.selectItem(BUCKET);
+			for (int i = 0; i < 100 && Inventory.getSelectedItemIndex() == -1; i++) {
+				Time.sleep(800, 1000);
+			}
+			pool.interact("Use");
+			for (int i = 0; i < 3 && Players.getLocal().getAnimation() == -1; i++) {
+				Time.sleep(1000);
+				pool.interact("Use");
+			}
+
+			int interval = 0;
+			int buckets = Inventory.getCount(BUCKET);
+			while (Inventory.getItem(BUCKET) != null) {
+				Time.sleep(1000);
+
+				if (Inventory.getCount(BUCKET) == buckets) {
+					interval++;
+				} else {
+					interval = 0;
+					buckets = Inventory.getCount(BUCKET);
+				}
+
+				if (interval >= 6)
+					break;
+			}
+			
+			state = State.CONFIGURE;
+		}
+
+		@Override
+		public boolean validate() {
+			return state == State.FILL_BUCKETS && isIn(POOL)
+					&& Inventory.getItem(BUCKET) != null; 
+		}
+		
+	}
+
+	private class WalkToPoolOfSlime implements Task, Condition {
+
+		@Override
+		public void run() {
+			SceneObject tile = SceneEntities.getNearest(TRAPDOOR_TILE);
+			
+			if (!isIn(ECTOFUNTUS_GROUND_FLOOR) && !isIn(ECTOFUNTUS_FIRST_FLOOR) && tile == null) {
+				teleportToEctofuntus();
+
+				// Wait for ectophial refill and teleport
+				Time.sleep(3000);
+				while (Inventory.getItem(ECTOPHIAL) == null) {
+					Time.sleep(300);
+				}
+
+				return;
+			}
+
+			if (isIn(ECTOFUNTUS_GROUND_FLOOR)) {
+				SceneObject trapdoor = SceneEntities.getNearest(
+						TRAPDOOR_CLOSED, TRAPDOOR_OPENED);
+
+				if (!trapdoor.isOnScreen()) {
+					Camera.turnTo(trapdoor);
+
+					if (!trapdoor.isOnScreen()) {
+						Walking.walk(trapdoor);
+						Time.sleep(1000, 1600);
+					}
+
+					return;
+				}
+
+				if (trapdoor.getId() == TRAPDOOR_CLOSED) {
+					trapdoor.interact("Open");
+					Time.sleep(300, 600);
+				}
+				SceneObject opened = SceneEntities.getNearest(TRAPDOOR_OPENED);
+
+				if (opened != null)
+					opened.interact("Climb-down");
+
+				Time.sleep(1000, 1600);
+				return;
+			}
+			
+			if (tile != null) {
+				SceneObject stairs = SceneEntities.getNearest(STAIRS_TRAPDOOR);
+				
+				if (stairs == null || (stairs != null && !stairs.isOnScreen())) {
+					int floor = Game.getPlane();
+					if (floor == 3) {
+						TRAPDOOR_THIRD_FLOOR_STEPS.traverse();
+						Time.sleep(1000, 2000);
+						return;
+					} else if (floor == 2) {
+						TRAPDOOR_SECOND_FLOOR_STEPS.traverse();
+						Time.sleep(1000, 2000);
+						return;
+					} else if (floor == 1) {
+						TRAPDOOR_FIRST_FLOOR_STEPS.traverse();
+						Time.sleep(1000, 2000);
+						return;
+					}
+				}
+				
+				stairs.interact("Climb-down");
+				Time.sleep(2000, 2600);
+				return;
+			}
+		}
+
+		@Override
+		public boolean validate() {
+			return state == State.FILL_BUCKETS && !isIn(POOL)
+					&& Inventory.getItem(BUCKET) != null;
+		}
+
+	}
+
+	private class BankForFilling implements Task, Condition {
+
+		@Override
+		public void run() {
+			if (!Bank.isOpen()) {
+				if (Tabs.getCurrent() != Tabs.INVENTORY)
+					Tabs.INVENTORY.open();
+
+				NPC banker = NPCs.getNearest(FREMMENIK_BANKER);
+
+				if (banker != null && banker.isOnScreen())
+					banker.interact("Bank");
+
+				for (int i = 0; i < 60 && !Bank.isOpen(); i++) {
+					Time.sleep(600);
+				}
+			}
+
+			int buckets = Bank.getItemCount(true, BUCKET);
+
+			if (buckets < 27) {
+				while (Inventory.getCount(BUCKET) < buckets) {
+					Bank.withdraw(BUCKET, buckets);
+					Time.sleep(1100, 1400);
+				}
+
+				Time.sleep(200, 400);
+
+				Bank.close();
+				return;
+			}
+
+			while (buckets >= 27 && Inventory.getCount(BUCKET) < 27) {
+				Bank.withdraw(BUCKET, (Inventory.getCount(BUCKET) == 0) ? 0
+						: 27 - Inventory.getCount(BUCKET));
+				Time.sleep(1100, 1400);
+			}
+
+			Time.sleep(200, 400);
+
+			Bank.close();
+		}
+
+		@Override
+		public boolean validate() {
+			return state == State.FILL_BUCKETS && isIn(BANK)
+					&& Inventory.getCount() <= 1;
+		}
+
 	}
 
 	private class GrindBones implements Task, Condition {
@@ -156,7 +370,7 @@ public class SlimeWorshipper extends ActiveScript implements PaintListener {
 				while (Inventory.getItem(ECTOPHIAL) == null) {
 					Time.sleep(300);
 				}
-				
+
 				return;
 			}
 
@@ -165,15 +379,15 @@ public class SlimeWorshipper extends ActiveScript implements PaintListener {
 
 				if (!stairs.isOnScreen()) {
 					Camera.turnTo(stairs);
-					
+
 					if (!stairs.isOnScreen()) {
 						PATH_TO_STAIRS.traverse();
 						Time.sleep(1000, 1600);
 					}
-					
+
 					return;
 				}
-				
+
 				stairs.interact("Climb-up");
 
 				Time.sleep(1000, 1600);
@@ -277,11 +491,17 @@ public class SlimeWorshipper extends ActiveScript implements PaintListener {
 				stop();
 			}
 
+			if (dryrun) {
+				agility = Skills.getRealLevel(Skills.AGILITY);
+				log.info("Agility: " + agility);
+			}
+
 			Item[] items = Inventory.getItems(new Filter<Item>() {
 
 				@Override
 				public boolean accept(Item t) {
-					return t.getId() == prayer.getId() || t.getId() == POT;
+					return t.getId() == prayer.getId() || t.getId() == POT
+							|| t.getId() == BUCKET;
 				}
 
 			});
@@ -300,11 +520,21 @@ public class SlimeWorshipper extends ActiveScript implements PaintListener {
 				}
 			}
 
+			for (Item item : items) {
+				if (item.getId() == BUCKET) {
+					state = State.FILL_BUCKETS;
+					return;
+				}
+			}
+
 			if (!isIn(DAEMONHEIM))
 				teleportToBank();
 
 			goToBank();
 
+			if (Tabs.getCurrent() != Tabs.INVENTORY)
+				Tabs.INVENTORY.open();
+			
 			NPC banker = NPCs.getNearest(FREMMENIK_BANKER);
 			banker.interact("Bank");
 
@@ -341,16 +571,22 @@ public class SlimeWorshipper extends ActiveScript implements PaintListener {
 					.getItemCount(true, POT);
 			int bonashes = Bank.getItemCount(true, prayer.getId());
 
-			int r = (prayer.isAsh()) ? 0 : Math.abs(Bank.getItemCount(true,
-					prayer.getMealId())
-					- Bank.getItemCount(true, BUCKET_OF_SLIME));
+			int r = (prayer.isAsh()) ? 0 : Bank.getItemCount(true,
+					prayer.getMealId());
 
-			// Set the Bones Per Trip
-			bpt = Math.min(bonashes, Math.min(buckets, pots) + r);
-
-			if (bpt == 0) {
+			if (dryrun && Math.min(bonashes + r, Math.min(buckets, pots)) == 0) {
 				log.severe("Missing bones/ashes, buckets, or empty pots");
 				stop();
+			}
+
+			dryrun = false;
+
+			if (!prayer.isAsh()) {
+				if (pots <= 0 || bonashes <= 0
+						|| Bank.getItemCount(prayer.getMealId()) >= buckets) {
+					state = State.FILL_BUCKETS;
+					return;
+				}
 			}
 
 			Bank.close();
@@ -448,6 +684,10 @@ public class SlimeWorshipper extends ActiveScript implements PaintListener {
 		return area.contains(Players.getLocal().getLocation());
 	}
 
+	private boolean isIn(Tile tile) {
+		return tile.isOnScreen() && tile.getPlane() == Game.getPlane();
+	}
+
 	private void goToBank() {
 		while (!BANKER.isOnScreen()) {
 			PATH_TO_BANKER.traverse();
@@ -494,7 +734,7 @@ public class SlimeWorshipper extends ActiveScript implements PaintListener {
 			Time.sleep(1000);
 		}
 	}
-	
+
 	private Color[] mouseColors() {
 		Color[] colors = new Color[mouseLocations.length];
 		int alpha = (int) (255D / (colors.length + 4D));
